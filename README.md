@@ -2,12 +2,12 @@
 
 Builds domain-specific models on distributed edge nodes with federated learning and shows how much the models improve application-level metrics. Three applications are included: content caching, inference offloading, and channel estimation. Events such as data distribution shift, node join, and cascade overload can be triggered while training rounds are running.
 
-The backend runs federated learning of LoRA adapters (FedAvg with per-tier quantization and pruning) in plain numpy.
+The backend runs federated learning of LoRA adapters (FedAvg with per-tier quantization and pruning) in PyTorch (CPU is enough).
 
 ## Getting started
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt     # numpy and PyTorch
 python backend/serve.py            # http://127.0.0.1:8000
 ```
 

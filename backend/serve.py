@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# 데모용 HTTP 서버. 표준 라이브러리만 쓴다.
+# 데모용 HTTP 서버. 서버 자체는 표준 라이브러리만 쓴다.
 #
 # 프론트엔드(저장소 루트)를 정적으로 서빙하고 /api 아래에 학습 API 를 연다.
 # 다른 프레임워크(FastAPI 등)로 바꿀 때는 edl/ 패키지는 그대로 두고 이 파일만 교체하면 된다.
@@ -68,8 +68,10 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if parts == ['api', 'health']:
                 import numpy
+                import torch
                 return self._send({'ok': True, 'version': VERSION,
                                    'numpy': numpy.__version__,
+                                   'torch': torch.__version__,
                                    'tasks': task_catalog()})
             if parts == ['api', 'tasks']:
                 return self._send({'tasks': task_catalog()})

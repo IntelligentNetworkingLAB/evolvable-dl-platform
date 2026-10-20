@@ -4,6 +4,7 @@
 # 도메인 KPI 를 실제로 계산한다. baseline 은 학습을 안 쓰는 기존 방식이다.
 
 import numpy as np
+import torch
 
 from ..fed import Client, Server
 
@@ -20,6 +21,8 @@ class Task:
 
     def __init__(self, seed=0, rounds=24, lr=None, epochs=None, batch=None):
         self.seed = seed
+        np.random.seed(seed)
+        torch.manual_seed(seed)
         self.rounds = rounds
         self.lr = lr or type(self).lr
         self.epochs = epochs or type(self).epochs

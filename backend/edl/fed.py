@@ -2,6 +2,7 @@
 # 어댑터만 서버로 올라간다.
 
 import numpy as np
+import torch
 
 from .model import LoRAMLP
 
@@ -16,32 +17,31 @@ def quantize(a, bits):
     """대칭 per-tensor 양자화. 값을 실제로 뭉갠다."""
     if bits >= 32:
         return a
-    m = np.max(np.abs(a))
+    m = a.abs().max() if a.numel() else a.new_zeros(())
     if m == 0:
         return a
     step = m / (2 ** (bits - 1) - 1)
-    return np.round(a / step) * step
+    return torch.round(a / step) * step
 
 
 def prune(a, rate):
     """크기 작은 원소부터 0 으로 만든다."""
-    if rate <= 0 or a.size == 0:
+    if rate <= 0 or a.numel() == 0:
         return a
-    k = int(a.size * rate)
+    k = int(a.numel() * rate)
     if k <= 0:
         return a
-    thr = np.partition(np.abs(a).ravel(), k - 1)[k - 1]
-    out = a.copy()
-    out[np.abs(out) <= thr] = 0.0
-    return out
+    mag = a.abs()
+    thr = torch.kthvalue(mag.flatten(), k).values
+    return torch.where(mag <= thr, torch.zeros_like(a), a)
 
 
 def fedavg(adapters, sizes):
     """샘플 수로 가중 평균."""
     if not adapters:
         raise ValueError('빈 어댑터 목록')
-    w = np.asarray(sizes, dtype=float)
-    w = w / w.sum()
+    w = torch.as_tensor(sizes, dtype=torch.float64)
+    w = (w / w.sum()).tolist()
     out = {}
     for k in adapters[0]:
         out[k] = sum(a[k] * wi for a, wi in zip(adapters, w))
@@ -57,7 +57,8 @@ class Client:
         self.X, self.y = X, y
         self.tier = tier
         self.rank = rank
-        self.rng = np.random.default_rng(seed)
+        self.rng = np.random.default_rng(seed)          # 드리프트용
+        self.gen = torch.Generator().manual_seed(seed)  # 미니배치 순서용
         self.model = LoRAMLP(X.shape[1], d_hidden, d_out,
                              rank=rank, seed=0, task=task)
         self.last_loss = None
@@ -88,7 +89,7 @@ class Client:
     def train(self, global_adapter, epochs=1, lr=0.05, batch=64):
         self.model.set_adapter(self._fit_rank(global_adapter))
         self.last_loss = self.model.train_epochs(
-            self.X, self.y, epochs=epochs, lr=lr, batch=batch, rng=self.rng)
+            self.X, self.y, epochs=epochs, lr=lr, batch=batch, gen=self.gen)
         # 올리기 전에 등급대로 프루닝하고 양자화한다. 저사양 노드는
         # 그만큼 손실이 생기고 그게 집계 결과에 실제로 반영된다.
         ad = self.model.get_adapter()
@@ -103,8 +104,8 @@ class Client:
         r = self.model.rank
         if ad['A'].shape[1] == r:
             return ad
-        return {'A': ad['A'][:, :r].copy(), 'B': ad['B'][:r, :].copy(),
-                'W2': ad['W2'].copy(), 'b2': ad['b2'].copy()}
+        return {'A': ad['A'][:, :r].clone(), 'B': ad['B'][:r, :].clone(),
+                'W2': ad['W2'].clone(), 'b2': ad['b2'].clone()}
 
     def apply_drift(self, strength=1.0):
         """입력 분포에 이동을 주어 드리프트를 만든다."""
@@ -135,8 +136,8 @@ class Server:
             ad, m, loss = c.train(self.adapter, epochs=epochs, lr=lr, batch=batch)
             # rank 가 작은 노드는 0 으로 채워 글로벌 rank 에 맞춘다.
             if ad['A'].shape[1] != self.rank:
-                A = np.zeros((ad['A'].shape[0], self.rank))
-                B = np.zeros((self.rank, ad['B'].shape[1]))
+                A = torch.zeros(ad['A'].shape[0], self.rank)
+                B = torch.zeros(self.rank, ad['B'].shape[1])
                 A[:, :ad['A'].shape[1]] = ad['A']
                 B[:ad['B'].shape[0], :] = ad['B']
                 ad = {'A': A, 'B': B, 'W2': ad['W2'], 'b2': ad['b2']}
